@@ -1,0 +1,164 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: postgres-database-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-database-controller
+  namespace: postgres-database-system
+  labels:
+    app: postgres-database-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-database-controller
+  template:
+    metadata:
+      labels:
+        app: postgres-database-controller
+    spec:
+      serviceAccountName: postgres-database-controller
+      containers:
+      - name: controller
+        image: agnosticdba/postgres-database-controller:latest
+        args:
+        - --leader-elect
+        ports:
+        - containerPort: 8080
+          name: metrics
+        - containerPort: 8081
+          name: health
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: postgres-database-controller
+  namespace: postgres-database-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: postgres-database-controller-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - ""
+  resources:
+  - services
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - databases.mycompany.com
+  resources:
+  - postgresdatabases
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - databases.mycompany.com
+  resources:
+  - postgresdatabases/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - databases.mycompany.com
+  resources:
+  - postgresdatabases/status
+  verbs:
+  - get
+  - update
+  - patch
+- apiGroups:
+  - pgv2.percona.com
+  resources:
+  - perconapgclusters
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - pgv2.percona.com
+  resources:
+  - perconapgclusters/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: postgres-database-controller-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: postgres-database-controller-role
+subjects:
+- kind: ServiceAccount
+  name: postgres-database-controller
+  namespace: postgres-database-system
