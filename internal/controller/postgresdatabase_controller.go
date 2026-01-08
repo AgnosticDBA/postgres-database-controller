@@ -21,7 +21,7 @@ type PlatformConfig struct {
 	DefaultStorageClass    string
 	DefaultImageRegistry   string
 	DefaultCRVersion       string
-	DefaultPGBouncerImage   string
+	DefaultPGBouncerImage  string
 	DefaultPGBackRestImage string
 	DefaultPMMImage        string
 	DefaultPMMHost         string
@@ -43,8 +43,8 @@ func NewDefaultPlatformConfig() *PlatformConfig {
 // PostgresDatabaseReconciler reconciles a PostgresDatabase object
 type PostgresDatabaseReconciler struct {
 	client.Client
-	Scheme        *runtime.Scheme
-	Log           logr.Logger
+	Scheme         *runtime.Scheme
+	Log            logr.Logger
 	PlatformConfig *PlatformConfig
 }
 
@@ -87,7 +87,7 @@ func (r *PostgresDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Req
 // generatePerconaPGCluster creates a PerconaPGCluster from PostgresDatabase
 func (r *PostgresDatabaseReconciler) generatePerconaPGCluster(db *databasesv1.PostgresDatabase) map[string]interface{} {
 	config := r.PlatformConfig
-	
+
 	// Create the PerconaPGCluster manifest as a generic map
 	cluster := map[string]interface{}{
 		"apiVersion": "pgv2.percona.com/v2",
@@ -101,8 +101,8 @@ func (r *PostgresDatabaseReconciler) generatePerconaPGCluster(db *databasesv1.Po
 			},
 		},
 		"spec": map[string]interface{}{
-			"crVersion":     config.DefaultCRVersion,
-			"image":         fmt.Sprintf("%s/percona-distribution-postgresql:%d.7-2", config.DefaultImageRegistry, db.Spec.Version),
+			"crVersion":       config.DefaultCRVersion,
+			"image":           fmt.Sprintf("%s/percona-distribution-postgresql:%d.7-2", config.DefaultImageRegistry, db.Spec.Version),
 			"postgresVersion": db.Spec.Version,
 			"instances": []map[string]interface{}{
 				{
@@ -148,7 +148,7 @@ func (r *PostgresDatabaseReconciler) generatePerconaPGCluster(db *databasesv1.Po
 			"enabled":    true,
 			"image":      fmt.Sprintf("%s/%s", config.DefaultImageRegistry, config.DefaultPMMImage),
 			"serverHost": config.DefaultPMMHost,
-		},
+		}
 	}
 
 	return cluster
@@ -246,7 +246,7 @@ func (r *PostgresDatabaseReconciler) updateStatus(db *databasesv1.PostgresDataba
 	db.Status.Phase = phase
 	db.Status.Message = message
 	db.Status.Endpoint = endpoint
-	
+
 	if err := r.Status().Update(context.Background(), db); err != nil {
 		r.Log.Error(err, "Failed to update PostgresDatabase status")
 	}
