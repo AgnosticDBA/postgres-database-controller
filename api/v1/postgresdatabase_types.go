@@ -40,17 +40,23 @@ type PostgresDatabaseSpec struct {
 	BackupRetention string `json:"backupRetention,omitempty"`
 }
 
+// +k8s:deepcopy-gen=true
+
 // ResourceRequirements defines CPU and memory requirements
 type ResourceRequirements struct {
 	Requests ResourceList `json:"requests,omitempty"`
 	Limits   ResourceList `json:"limits,omitempty"`
 }
 
+// +k8s:deepcopy-gen=true
+
 // ResourceList defines resource quantities
 type ResourceList struct {
 	CPU    string `json:"cpu,omitempty"`
 	Memory string `json:"memory,omitempty"`
 }
+
+// +k8s:deepcopy-gen=true
 
 // PostgresDatabaseStatus defines the observed state of PostgresDatabase
 type PostgresDatabaseStatus struct {

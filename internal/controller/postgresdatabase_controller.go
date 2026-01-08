@@ -6,7 +6,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/json"
@@ -70,7 +70,9 @@ func (r *PostgresDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	// Check if PerconaPGCluster already exists
-	var existingCluster pgv2.PerconaPGCluster
+	var existingCluster unstructured.Unstructured
+	existingCluster.SetAPIVersion("pgv2.percona.com/v2")
+	existingCluster.SetKind("PerconaPGCluster")
 	if err := r.Get(ctx, types.NamespacedName{Name: db.Name, Namespace: db.Namespace}, &existingCluster); err != nil {
 		if errors.IsNotFound(err) {
 			// Create the PerconaPGCluster
@@ -216,8 +218,6 @@ func (r *PostgresDatabaseReconciler) createPerconaPGCluster(ctx context.Context,
 
 // updateStatusFromCluster updates PostgresDatabase status based on PerconaPGCluster
 func (r *PostgresDatabaseReconciler) updateStatusFromCluster(ctx context.Context, db *databasesv1.PostgresDatabase, cluster client.Object) (ctrl.Result, error) {
-	log := r.Log.WithValues("postgresdatabase", types.NamespacedName{Name: db.Name, Namespace: db.Namespace})
-
 	// Determine cluster status
 	phase := "Creating"
 	message := "PerconaPGCluster is being provisioned"
@@ -228,11 +228,11 @@ func (r *PostgresDatabaseReconciler) updateStatusFromCluster(ctx context.Context
 	if cluster.GetAnnotations()["postgres-operator.crunchydata.com/state"] == "Ready" {
 		phase = "Ready"
 		message = "PostgreSQL database is ready for connections"
-		replicas = db.Spec.Replicas
+		replicas = int32(db.Spec.Replicas)
 	}
 
 	// Update status
-	db.Status.Replicas = replicas
+	db.Status.Replicas = int(replicas)
 	db.Status.Endpoint = endpoint
 	db.Status.CredentialsSecret = fmt.Sprintf("%s.postgres-secret", db.Name)
 
