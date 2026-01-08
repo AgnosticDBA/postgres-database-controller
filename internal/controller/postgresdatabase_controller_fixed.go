@@ -9,42 +9,18 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/json"
+	"k8s.io/apimachinery/pkg/util/yaml"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	databasesv1 "github.com/mycompany/postgres-database-controller/api/v1"
 )
 
-// PlatformConfig holds platform-wide defaults
-type PlatformConfig struct {
-	DefaultStorageClass    string
-	DefaultImageRegistry   string
-	DefaultCRVersion       string
-	DefaultPGBouncerImage   string
-	DefaultPGBackRestImage string
-	DefaultPMMImage        string
-	DefaultPMMHost         string
-}
-
-// NewDefaultPlatformConfig returns platform defaults
-func NewDefaultPlatformConfig() *PlatformConfig {
-	return &PlatformConfig{
-		DefaultStorageClass:    "standard",
-		DefaultImageRegistry:   "docker.io/percona",
-		DefaultCRVersion:       "2.8.2",
-		DefaultPGBouncerImage:  "percona-pgbouncer:1.25.0-1",
-		DefaultPGBackRestImage: "percona-pgbackrest:2.57.0-1",
-		DefaultPMMImage:        "pmm-client:3.5.0",
-		DefaultPMMHost:         "prometheus.monitoring",
-	}
-}
-
 // PostgresDatabaseReconciler reconciles a PostgresDatabase object
 type PostgresDatabaseReconciler struct {
 	client.Client
-	Scheme        *runtime.Scheme
-	Log           logr.Logger
+	Scheme         *runtime.Scheme
+	Log            logr.Logger
 	PlatformConfig *PlatformConfig
 }
 
@@ -70,8 +46,20 @@ func (r *PostgresDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	// Check if PerconaPGCluster already exists
-	var existingCluster pgv2.PerconaPGCluster
-	if err := r.Get(ctx, types.NamespacedName{Name: db.Name, Namespace: db.Namespace}, &existingCluster); err != nil {
+	clusterName := types.NamespacedName{Name: db.Name, Namespace: db.Namespace}
+	
+	// Try to find existing cluster
+	var existingCluster client.Object
+	clusterGVK := metav1.GroupVersionKind{
+		Group:   "pgv2.percona.com",
+		Version: "v2",
+		Kind:    "PerconaPGCluster",
+	}
+	
+	existingCluster = &runtime.Unstructured{}
+	existingCluster.GetObjectKind().SetGroupVersionKind(clusterGVK)
+	
+	if err := r.Get(ctx, clusterName, existingCluster); err != nil {
 		if errors.IsNotFound(err) {
 			// Create the PerconaPGCluster
 			return r.createPerconaPGCluster(ctx, &db)
@@ -81,117 +69,20 @@ func (r *PostgresDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	// Update status based on existing cluster
-	return r.updateStatusFromCluster(ctx, &db, &existingCluster)
-}
-
-// generatePerconaPGCluster creates a PerconaPGCluster from PostgresDatabase
-func (r *PostgresDatabaseReconciler) generatePerconaPGCluster(db *databasesv1.PostgresDatabase) map[string]interface{} {
-	config := r.PlatformConfig
-	
-	// Create the PerconaPGCluster manifest as a generic map
-	cluster := map[string]interface{}{
-		"apiVersion": "pgv2.percona.com/v2",
-		"kind":       "PerconaPGCluster",
-		"metadata": map[string]interface{}{
-			"name":      db.Name,
-			"namespace": db.Namespace,
-			"labels": map[string]string{
-				"created-by": "postgres-database-controller",
-				"app":        "postgres-database",
-			},
-		},
-		"spec": map[string]interface{}{
-			"crVersion":     config.DefaultCRVersion,
-			"image":         fmt.Sprintf("%s/percona-distribution-postgresql:%d.7-2", config.DefaultImageRegistry, db.Spec.Version),
-			"postgresVersion": db.Spec.Version,
-			"instances": []map[string]interface{}{
-				{
-					"name":     "instance1",
-					"replicas": db.Spec.Replicas,
-					"dataVolumeClaimSpec": map[string]interface{}{
-						"accessModes": []string{"ReadWriteOnce"},
-						"resources": map[string]interface{}{
-							"requests": map[string]interface{}{
-								"storage": db.Spec.Storage,
-							},
-						},
-						"storageClassName": config.DefaultStorageClass,
-					},
-					"affinity": r.generatePodAntiAffinity(),
-				},
-			},
-		},
-	}
-
-	// Add PgBouncer proxy
-	cluster["spec"].(map[string]interface{})["proxy"] = map[string]interface{}{
-		"pgBouncer": map[string]interface{}{
-			"replicas": db.Spec.Replicas,
-			"image":    fmt.Sprintf("%s/%s", config.DefaultImageRegistry, config.DefaultPGBouncerImage),
-			"affinity": r.generatePodAntiAffinity(),
-		},
-	}
-
-	// Add backups if enabled
-	if db.Spec.Backup {
-		cluster["spec"].(map[string]interface{})["backups"] = map[string]interface{}{
-			"pgbackrest": map[string]interface{}{
-				"image": fmt.Sprintf("%s/%s", config.DefaultImageRegistry, config.DefaultPGBackRestImage),
-				"repos": []map[string]interface{}{{"name": "repo1"}},
-			},
-		}
-	}
-
-	// Add monitoring if enabled
-	if db.Spec.Monitoring {
-		cluster["spec"].(map[string]interface{})["pmm"] = map[string]interface{}{
-			"enabled":    true,
-			"image":      fmt.Sprintf("%s/%s", config.DefaultImageRegistry, config.DefaultPMMImage),
-			"serverHost": config.DefaultPMMHost,
-		},
-	}
-
-	return cluster
-}
-
-// generatePodAntiAffinity creates default pod anti-affinity rules
-func (r *PostgresDatabaseReconciler) generatePodAntiAffinity() map[string]interface{} {
-	return map[string]interface{}{
-		"podAntiAffinity": map[string]interface{}{
-			"preferredDuringSchedulingIgnoredDuringExecution": []map[string]interface{}{
-				{
-					"weight": 1,
-					"podAffinityTerm": map[string]interface{}{
-						"labelSelector": map[string]interface{}{
-							"matchLabels": map[string]string{
-								"postgres-operator.crunchydata.com/data": "postgres",
-							},
-						},
-						"topologyKey": "kubernetes.io/hostname",
-					},
-				},
-			},
-		},
-	}
+	return r.updateStatusFromCluster(ctx, &db, existingCluster)
 }
 
 // createPerconaPGCluster creates the underlying PerconaPGCluster
 func (r *PostgresDatabaseReconciler) createPerconaPGCluster(ctx context.Context, db *databasesv1.PostgresDatabase) (ctrl.Result, error) {
 	log := r.Log.WithValues("postgresdatabase", types.NamespacedName{Name: db.Name, Namespace: db.Namespace})
 
-	// Generate the PerconaPGCluster as Unstructured
-	cluster := r.generatePerconaPGCluster(db)
-
-	// Convert to JSON and back to Unstructured
-	clusterJSON, err := json.Marshal(cluster)
-	if err != nil {
-		log.Error(err, "Failed to marshal cluster")
-		return ctrl.Result{}, err
-	}
-
-	var clusterObj client.Object
-	if err := json.Unmarshal(clusterJSON, &clusterObj); err != nil {
-		log.Error(err, "Failed to unmarshal cluster")
+	// Generate the PerconaPGCluster YAML
+	clusterYAML := r.generateClusterYAML(db)
+	
+	// Parse YAML into Unstructured object
+	clusterObj := &runtime.Unstructured{}
+	if err := yaml.Unmarshal([]byte(clusterYAML), clusterObj); err != nil {
+		log.Error(err, "Failed to parse cluster YAML")
 		return ctrl.Result{}, err
 	}
 
@@ -214,6 +105,87 @@ func (r *PostgresDatabaseReconciler) createPerconaPGCluster(ctx context.Context,
 	return ctrl.Result{RequeueAfter: 30}, nil
 }
 
+// generateClusterYAML creates the PerconaPGCluster YAML from PostgresDatabase
+func (r *PostgresDatabaseReconciler) generateClusterYAML(db *databasesv1.PostgresDatabase) string {
+	config := r.PlatformConfig
+	
+	// Base cluster configuration
+	clusterYAML := fmt.Sprintf(`
+apiVersion: pgv2.percona.com/v2
+kind: PerconaPGCluster
+metadata:
+  name: %s
+  namespace: %s
+  labels:
+    created-by: postgres-database-controller
+    app: postgres-database
+spec:
+  crVersion: "%s"
+  image: %s/percona-distribution-postgresql:%d.7-2
+  postgresVersion: %d
+  instances:
+  - name: instance1
+    replicas: %d
+    dataVolumeClaimSpec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: %s
+      storageClassName: %s
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 1
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                postgres-operator.crunchydata.com/data: postgres
+            topologyKey: kubernetes.io/hostname
+  proxy:
+    pgBouncer:
+      replicas: %d
+      image: %s/%s
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 1
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  postgres-operator.crunchydata.com/role: pgbouncer
+              topologyKey: kubernetes.io/hostname`,
+		db.Name, db.Namespace, config.DefaultCRVersion,
+		config.DefaultImageRegistry, db.Spec.Version, db.Spec.Version,
+		db.Spec.Replicas, db.Spec.Storage, config.DefaultStorageClass,
+		db.Spec.Replicas, config.DefaultImageRegistry, config.DefaultPGBouncerImage)
+
+	// Add backups if enabled
+	if db.Spec.Backup {
+		clusterYAML += fmt.Sprintf(`
+  backups:
+    pgbackrest:
+      image: %s/%s
+      repos:
+      - name: repo1
+        schedules:
+          full: "0 0 * * 6"`,
+			config.DefaultImageRegistry, config.DefaultPGBackRestImage)
+	}
+
+	// Add monitoring if enabled
+	if db.Spec.Monitoring {
+		clusterYAML += fmt.Sprintf(`
+  pmm:
+    enabled: true
+    image: %s/%s
+    serverHost: %s`,
+			config.DefaultImageRegistry, config.DefaultPMMImage, config.DefaultPMMHost)
+	}
+
+	return clusterYAML
+}
+
 // updateStatusFromCluster updates PostgresDatabase status based on PerconaPGCluster
 func (r *PostgresDatabaseReconciler) updateStatusFromCluster(ctx context.Context, db *databasesv1.PostgresDatabase, cluster client.Object) (ctrl.Result, error) {
 	log := r.Log.WithValues("postgresdatabase", types.NamespacedName{Name: db.Name, Namespace: db.Namespace})
@@ -225,7 +197,8 @@ func (r *PostgresDatabaseReconciler) updateStatusFromCluster(ctx context.Context
 	replicas := int32(0)
 
 	// Check cluster status (simplified - in real implementation, check cluster.Status)
-	if cluster.GetAnnotations()["postgres-operator.crunchydata.com/state"] == "Ready" {
+	annotations := cluster.GetAnnotations()
+	if annotations != nil && annotations["postgres-operator.crunchydata.com/state"] == "Ready" {
 		phase = "Ready"
 		message = "PostgreSQL database is ready for connections"
 		replicas = db.Spec.Replicas
