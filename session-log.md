@@ -117,3 +117,7 @@ output rules (optionally as output:<generator>:...)
 +output:stdout                                     package  outputs everything to standard-out, with no separation.   
 
 run `controller-gen object paths=./api/v1/ --dry-run -w` to see all available markers, or `controller-gen object paths=./api/v1/ --dry-run -h` for usage
+📦 Phase 3: Integration Testing
+Timestamp: Fri  9 Jan 2026 01:17:14 CET
+🧪 Phase 2: Core Fix
+Timestamp: Fri  9 Jan 2026 01:17:25 CET
