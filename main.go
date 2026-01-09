@@ -28,8 +28,15 @@ var (
 )
 
 func init() {
+	setupLog.Info("Initializing scheme...")
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	setupLog.Info("Added client-go scheme")
 	utilruntime.Must(databasesv1.AddToScheme(scheme))
+	setupLog.Info("Added databases.v1 scheme")
+
+	// Debug: Print scheme contents
+	schemes := scheme.AllKnownTypes()
+	setupLog.Info("Scheme contains", "types", len(schemes))
 	//+kubebuilder:scaffold:scheme
 }
 
@@ -58,15 +65,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.PostgresDatabaseReconciler{
+	setupLog.Info("Setting up PostgresDatabase controller...")
+	reconciler := &controller.PostgresDatabaseReconciler{
 		Client:         mgr.GetClient(),
 		Scheme:         mgr.GetScheme(),
 		Log:            ctrl.Log.WithName("controllers").WithName("PostgresDatabase"),
 		PlatformConfig: controller.NewDefaultPlatformConfig(),
-	}).SetupWithManager(mgr); err != nil {
+	}
+
+	setupLog.Info("Created reconciler", "client", mgr.GetClient() != nil, "scheme", mgr.GetScheme() != nil)
+
+	if err := reconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "PostgresDatabase")
 		os.Exit(1)
 	}
+	setupLog.Info("Controller setup completed successfully")
 	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
